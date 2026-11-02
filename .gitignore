@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+tua/dist/
+tua/local/.runtime/
+jobs/
+results/raw/
+.env
+.env.*
+.DS_Store

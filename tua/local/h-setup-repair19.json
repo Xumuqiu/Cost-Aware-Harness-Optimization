@@ -1,0 +1,201 @@
+{
+  "benchmark": "TUA-Bench",
+  "n": 19,
+  "source_job": "/Users/xumuqiu/Desktop/Tri1材料/PE6203/6203_GP_2/mini-swe-agent-tua/jobs/previous40-20261031-130932/H-qwen/run",
+  "source_result_sha256": "e2026d4ee2c2fd2cb64c31605e65403eaddd31171df5606f04059ae60ba579fe",
+  "rule": "All original H-qwen trials with an installation exception, no agent execution and no reward; never selected by low score.",
+  "tasks": [
+    "047-set-bing-search",
+    "085-webext-happy-scaffold",
+    "106-create-charles-ssh-user",
+    "012-hide-na-budget-values",
+    "014-pivot-promo-revenue",
+    "020-calculate-period-rate",
+    "021-fill-ramp-chart",
+    "083-gemini-responses-docx",
+    "097-slides-to-document",
+    "102-daily-email-report",
+    "116-bottom-left-page-numbers",
+    "117-comma-text-to-table",
+    "118-set-times-new-roman",
+    "043-load-hello-extension",
+    "076-make-src-gif-clip",
+    "077-corresponding-scholar-url",
+    "079-fix-mp3-metadata",
+    "080-convert-novel-epub",
+    "081-video-frame-slide-bg"
+  ],
+  "evidence": {
+    "047-set-bing-search": {
+      "trial": "047-set-bing-search__bx2sEqR",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/047-set-bing-search__bx2sEqR/agent/setup/local-runtime.txt",
+      "result_sha256": "a2f08d98ce70bb2a006e3f9b766c1662e56283d04cd570426041087a44982ea1"
+    },
+    "085-webext-happy-scaffold": {
+      "trial": "085-webext-happy-scaffold__uvsaSp4",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/085-webext-happy-scaffold__uvsaSp4/agent/setup/local-runtime.txt",
+      "result_sha256": "ded2412f32c7b45e8781179148f6ffc2ad841720c32261f95260465b96ba0c34"
+    },
+    "106-create-charles-ssh-user": {
+      "trial": "106-create-charles-ssh-user__LHpRnBX",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/106-create-charles-ssh-user__LHpRnBX/agent/setup/local-runtime.txt",
+      "result_sha256": "3fb1a968ad9c36598db281c3408c0b5d8e21db562adecd55567e793196b60500"
+    },
+    "012-hide-na-budget-values": {
+      "trial": "012-hide-na-budget-values__JvrjpPM",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/012-hide-na-budget-values__JvrjpPM/agent/setup/local-runtime.txt",
+      "result_sha256": "f28d2bbcf38108d55c10ccddb398bc60ec674cd502263af7e19035a875b581d5"
+    },
+    "014-pivot-promo-revenue": {
+      "trial": "014-pivot-promo-revenue__4YuEWZX",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/014-pivot-promo-revenue__4YuEWZX/agent/setup/local-runtime.txt",
+      "result_sha256": "f5783e130a73d9d88fcb3e5e99119e3e80c515d70b1e7a3cc4db24c41c645448"
+    },
+    "020-calculate-period-rate": {
+      "trial": "020-calculate-period-rate__8fPKXTz",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/020-calculate-period-rate__8fPKXTz/agent/setup/local-runtime.txt",
+      "result_sha256": "c7ab5eaab71676c0bb789eb96bdc47222b20acdfc2903ce47b3ac589dc4e5ce8"
+    },
+    "021-fill-ramp-chart": {
+      "trial": "021-fill-ramp-chart__f9BYghY",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "pip index JSON parsing",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/021-fill-ramp-chart__f9BYghY/agent/setup/local-runtime.txt",
+      "result_sha256": "9a8044473e735dc770cf04496eb57bb84d39bedb7f83fdf78321a941045f70c2"
+    },
+    "083-gemini-responses-docx": {
+      "trial": "083-gemini-responses-docx__aiYTFpw",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/083-gemini-responses-docx__aiYTFpw/agent/setup/local-runtime.txt",
+      "result_sha256": "87c0c98b9d388b64e5be01fea287fdb0b33989e1687fc08a346bc2fa25a0ea58"
+    },
+    "097-slides-to-document": {
+      "trial": "097-slides-to-document__SM25pfo",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/097-slides-to-document__SM25pfo/agent/setup/local-runtime.txt",
+      "result_sha256": "6224f8951f6599b31dab433e5b55b88666157ca07a0ba3b52b632bb8a205e7b4"
+    },
+    "102-daily-email-report": {
+      "trial": "102-daily-email-report__Bzep5n9",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/102-daily-email-report__Bzep5n9/agent/setup/local-runtime.txt",
+      "result_sha256": "a7febd49cc988cbb5101796f8ce6beb31bc51057161034e07666bfa3174ec819"
+    },
+    "116-bottom-left-page-numbers": {
+      "trial": "116-bottom-left-page-numbers__asrc7R2",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/116-bottom-left-page-numbers__asrc7R2/agent/setup/local-runtime.txt",
+      "result_sha256": "bee41a6ac6667a8bdf982e9772b2a8fcf587d57e532fc619506d05c9096c4134"
+    },
+    "117-comma-text-to-table": {
+      "trial": "117-comma-text-to-table__aojERqT",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/117-comma-text-to-table__aojERqT/agent/setup/local-runtime.txt",
+      "result_sha256": "dac3c9324d16f6265b08853240f24cb1b277242a8025b09f8f93f0b544790459"
+    },
+    "118-set-times-new-roman": {
+      "trial": "118-set-times-new-roman__9igHuMf",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/118-set-times-new-roman__9igHuMf/agent/setup/local-runtime.txt",
+      "result_sha256": "f547b4c2ff67739189436b5d73fcaccfc16200162db5d5c0bf1ad57f71f0fc46"
+    },
+    "043-load-hello-extension": {
+      "trial": "043-load-hello-extension__4t6Yuue",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/043-load-hello-extension__4t6Yuue/agent/setup/local-runtime.txt",
+      "result_sha256": "6fbba736d21f7a5fc1caea225605a3f243e2281ea30935c37300a9bb6a8b4189"
+    },
+    "076-make-src-gif-clip": {
+      "trial": "076-make-src-gif-clip__YbN65hW",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/076-make-src-gif-clip__YbN65hW/agent/setup/local-runtime.txt",
+      "result_sha256": "02b0cea4ab02fc7f02a6af20d2a9f4afb9a6d2933caafe783f8c2a11b757c696"
+    },
+    "077-corresponding-scholar-url": {
+      "trial": "077-corresponding-scholar-url__2bnTtrn",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/077-corresponding-scholar-url__2bnTtrn/agent/setup/local-runtime.txt",
+      "result_sha256": "28ab599a18c030ea6898f4d8f8b8d9d29db220f4ff8ddcc454f7f2d2df97265c"
+    },
+    "079-fix-mp3-metadata": {
+      "trial": "079-fix-mp3-metadata__EA3oVtH",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/079-fix-mp3-metadata__EA3oVtH/agent/setup/local-runtime.txt",
+      "result_sha256": "b27478d1c19aedf4bc5fc6912ea78725100e4b24bb6ac4bc3297b5c2d9d555a3"
+    },
+    "080-convert-novel-epub": {
+      "trial": "080-convert-novel-epub__Xext5q6",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/080-convert-novel-epub__Xext5q6/agent/setup/local-runtime.txt",
+      "result_sha256": "d3aca6b60d8abaf44288ef2dd4f2610c1778e910c5ca85132d1808a1b6029cbb"
+    },
+    "081-video-frame-slide-bg": {
+      "trial": "081-video-frame-slide-bg__Gxd5TAZ",
+      "exception_type": "NonZeroAgentExitCodeError",
+      "stage": "agent_setup",
+      "agent_execution_started": false,
+      "classification": "SSL/TLS dependency download",
+      "setup_log": "jobs/previous40-20261031-130932/H-qwen/run/081-video-frame-slide-bg__Gxd5TAZ/agent/setup/local-runtime.txt",
+      "result_sha256": "afeecb44b91610806c5f7eb36a2b2bc0304da7daa37e4886eec6eb6f55ce4338"
+    }
+  }
+}

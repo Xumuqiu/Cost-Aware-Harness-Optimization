@@ -1,0 +1,13 @@
+{
+  "fork_source": "https://github.com/zhaoyijie1201/mini-swe-agent-tua",
+  "fork_commit": "3862cb6214186c8e600d85b9447d573f15b7794d",
+  "upstream": "https://github.com/SWE-agent/mini-swe-agent",
+  "version": "2.4.6+tua.1",
+  "note": "Working-tree additions from the local project are included; this is not a pristine snapshot of the fork commit.",
+  "benchmark": "https://github.com/facebookresearch/TUA-Bench",
+  "benchmark_commit": "3497fd320abcafaf4797424192c891a593fd7964",
+  "trials": 440,
+  "evidence_files": 3968,
+  "credential_redactions": 8,
+  "omitted": "Task artifacts, Docker images, dependency wheels, and unrelated/cancelled/repeated trials."
+}
