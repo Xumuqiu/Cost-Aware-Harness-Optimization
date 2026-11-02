@@ -1,120 +1,124 @@
-# PE6203 实验报告：Cost-Aware Harness Optimization
+# PE6203 Experimental Report: Cost-Aware Harness Optimization
 
-## 摘要
+## Abstract
 
-本项目研究：在不替换低成本模型的前提下，改进 agent 的运行控制、恢复与交付检查，能否改善 TUA-Bench 的质量—成本表现。以 mini-swe-agent 2.4.6 为基础，加入五个独立组件，并在同一固定 40 题上进行 A0–A5 单组件比较。另使用原 harness 的 DeepSeek 历史结果作为较强模型参照。
+This project investigates whether changes to agent execution control, recovery and submission checks can improve the quality–cost trade-off on TUA-Bench while keeping the low-cost base model fixed. We extend mini-swe-agent 2.4.6 with five independently configurable components and compare A0–A5 on the same fixed 40-task subset. Historical DeepSeek results obtained with the original harness provide an additional model reference.
 
-本次所选样本中，C3 提交前自检的收益最大：完整通过率由 A0 的 17.5% 提升至 35.0%，平均 reward 由 0.2317 提升至 0.4138，每题参考费用由 $0.006548 增至 $0.007444。C2 停滞恢复达到 25.0% 完整通过率，每题 $0.004590，形成更低成本的选择。原 harness 的 DeepSeek 历史轮完整通过率为 50.0%、平均 reward 为 0.5660。改进后的 Qwen 尚未达到其绝对成功率。
+In the selected sample, C3 (pre-submission verification) produces the largest observed improvement: the full-pass rate increases from 17.5% for A0 to 35.0%, mean reward increases from 0.2317 to 0.4138, and estimated cost per task rises from $0.006548 to $0.007444. C2 (stall recovery) achieves a 25.0% full-pass rate at $0.004590 per task, offering a lower-cost option. The historical DeepSeek run with the original harness achieves a 50.0% full-pass rate and 0.5660 mean reward. The improved Qwen configurations do not reach that absolute success rate.
 
-所有数值均来自已有实验，不新增模型调用。A0–A2 的第二轮与 A3–A5 的补跑轮来自不同批次，DeepSeek 的路由、reasoning 和预算也不同；因此主要结果是带可比性限制的单次观察。
+All figures come from existing experiments; preparing this report involves no new model calls. A0–A2 use second repetitions, whereas A3–A5 use a later recovery batch. DeepSeek also differs in routing, reasoning and budget settings. The results therefore describe selected single-run observations with explicit comparability limitations.
 
-## 1. 原 mini-swe-agent 是怎样的
+## 1. Original mini-swe-agent
 
-mini-swe-agent 是一个简洁的 agent 执行循环。本项目使用 v2.4.6：将系统提示和任务组成消息历史，向模型请求 bash 工具调用，在 Linux 容器中执行命令，将返回码及输出交给模型，然后继续下一步。模型通过单独执行 `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` 提交；评分由外部 TUA-Bench verifier 完成。
+mini-swe-agent implements a compact agent execution loop. In v2.4.6, the system prompt and task initialize a message history. The model requests bash tool calls, commands execute in a Linux container, and return codes and outputs become observations for the next model request. The model submits by issuing `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a standalone command. An external TUA-Bench verifier scores the result.
 
-它提供模型适配、环境执行、消息历史、工具调用解析、限额检查及轨迹保存等基础能力。默认模板主要围绕软件 issue 修复组织工作流程。每条命令在新的 shell 中执行，文件系统保留，但 `cd` 等 shell 状态不会自动延续。
+The original implementation provides model adapters, environment execution, message history, tool-call parsing, limit checks and trajectory recording. Its default prompt primarily describes a software issue repair workflow. Each command runs in a fresh shell: filesystem changes persist, but shell state such as `cd` does not carry over automatically.
 
-原实现已经支持步数、费用、时间限额及格式错误恢复；本项目的改进不是从零添加这些能力，而是在此基础上增加预算可见性、面向任务的恢复及提交检查。默认步数/内部时间限额可以为 0，具体实验仍可配置限额。历史 DeepSeek 轮实际使用 100 步/2400 秒，不能描述为没有预算限制。
+Step, cost and time limits, as well as format-error recovery, already exist upstream. Our contribution adds budget visibility, task-oriented recovery and submission checks on top of these capabilities. Default step and internal time limits may be zero, but individual experiments can configure limits. The historical DeepSeek run uses 100 steps and 2400 seconds and must not be described as unbounded.
 
-原版的不足在于：工具输出主要按长度截断，缺少针对 GUI/办公噪声及长历史的专门处理；没有显式的停滞检测；第一次提交直接结束，没有独立产物检查；通用代码修复提示对办公文件、浏览器与应用设置的指导有限。工具调用格式错误虽有恢复提示，但多次失败仍可能终止。
+The original harness mainly truncates tool output by length, without dedicated handling of GUI/Office noise or long observation histories. It lacks explicit stall detection and an independent artifact check before the first submission ends the run. General software repair instructions provide limited guidance for Office files, browsers and application settings. Format-error feedback is available, but repeated failures can still terminate execution.
 
-实现依据：[DefaultAgent 执行循环](<../src/minisweagent/agents/default.py>)、[原版模板与配置](<../src/minisweagent/config/tua/base.yaml>)。
+Implementation references: [DefaultAgent execution loop](../src/minisweagent/agents/default.py) and [original prompt and configuration](../src/minisweagent/config/tua/base.yaml).
 
-## 2. 我们改了什么，为什么这样改
+## 2. Harness improvements and rationale
 
-改进以 `TuaAgent` 继承现有 agent 实现，C1–C4 为独立开关，C5 为模板替换；全关 A0 保留原版行为。新增检查与提示不使用额外的独立 LLM 服务，但反馈可能使 agent 继续调用主模型，所以不能声称总模型调用次数不增加。
+`TuaAgent` extends the existing agent. C1–C4 are independent switches; C5 replaces the prompt templates. A0 disables all components and preserves the original behavior. The new checks and notices do not invoke a separate LLM service. Their feedback can nevertheless lead to additional calls to the base model, so total model-call count is not guaranteed to remain unchanged.
 
-| 组件 | 具体改进 | 目标问题与设计理由 | 代价或边界 |
+| Component | Implementation | Motivation | Cost or limitation |
 |---|---|---|---|
-| C1 预算可见 | 观测追加剩余预算；到 80% 注入收尾提示；150 步/2200 秒内部上限 | 模型看不到剩余时间时，可能一直探索而未保存产物；预留收尾时间 | 提示占输入；过早收尾可能损失质量；效果包含预算上限变化 |
-| C2 停滞恢复 | 最近 6 步同一命令出现至少 3 次、相同输出及超时时提示；命令超时 120 秒、格式错误容忍 10 次及恢复模板 | GUI/Office 启动慢，原样重试和工具格式错误易耗尽预算；提示模型改变策略 | 没有强制切换策略；较长等待与更多容忍也可能增加成本 |
-| C3 提交前自检 | 拦截第一次提交；只读检查路径、文件大小、Office zip 结构、xlsx 公式缓存；返回报告后放行第二次提交 | “文件存在”不等于评分器读到正确值；反馈给模型修复机会 | 不保证内容语义正确；只有尝试提交才触发；可能增加后续调用 |
-| C4 观测去噪与压缩 | 去已知噪声、折叠重复行；头80/尾40行截断；最近8条外的观测保留前400字符 | 长日志和重复输出占据上下文，增加输入费用与干扰 | 可能丢信息或降低缓存复用；压缩不保证总成本降低 |
-| C5 任务域提示词 | 替换 system/instance 模板，强调检查环境、备份、Office重算保存、GUI状态和最终验证 | 让工作流程贴近办公/浏览器/终端任务，减少工具和保存方式误用 | 模板更长；不包含任务答案；不能替代模型的规划能力 |
+| C1: budget visibility | Append remaining-budget notices to observations; issue a wrap-up reminder at 80%; use internal limits of 150 steps and 2200 seconds | Reserve time for saving and finishing rather than continuing exploration without awareness of the remaining budget | Notices consume input tokens; early wrap-up can reduce quality; the intervention includes budget-limit changes |
+| C2: stall recovery | Detect a command repeated at least 3 times in the latest 6 steps, identical outputs and timeouts; use a 120-second command timeout, tolerance for 10 consecutive format errors and recovery templates | Encourage a strategy change when slow GUI/Office startup, repeated commands or format failures consume the budget | No strategy change is enforced; longer waits and greater error tolerance can increase cost |
+| C3: pre-submission verification | Intercept the first submission; run read-only checks of paths, file sizes, Office ZIP structure and XLSX formula caches; return feedback and allow the second submission | File existence alone does not ensure that the verifier can read the expected values; feedback creates an opportunity to repair the artifact | Does not establish semantic correctness; activates only on submission; may cause additional model calls |
+| C4: observation hygiene and compression | Remove known noise, collapse repeated lines, retain the first 80 and last 40 lines of long outputs, and keep only the first 400 characters of observations older than the latest 8 | Reduce distracting logs and repeated content in the context | Can discard useful information or reduce cache reuse; compression does not guarantee lower total cost |
+| C5: task-domain prompts | Replace system/instance templates with guidance on environment inspection, backups, Office recalculation and saving, GUI state and final verification | Adapt the workflow to Office, browser and terminal tasks | Longer instructions consume context; contain no task answers and cannot replace model planning |
 
-C3 不读取标准答案、不修改任务文件；C5 不包含具体题目解法。具体代码见 [TuaAgent](<../src/minisweagent/agents/tua.py>)、[组件辅助函数](<../src/minisweagent/agents/utils/tua_utils.py>)、[C5提示词](<../src/minisweagent/config/tua/prompt_tua.yaml>)。
+C3 does not read reference answers or modify task files through its check. C5 contains no task-specific solutions. See [TuaAgent](../src/minisweagent/agents/tua.py), [component helpers](../src/minisweagent/agents/utils/tua_utils.py) and [C5 templates](../src/minisweagent/config/tua/prompt_tua.yaml).
 
-## 3. 实验设置与样本选择
+## 3. Experimental setup and sample selection
 
-### 3.1 任务与配置
+### 3.1 Tasks and configurations
 
-固定 40 题来自 `subset-previous40.json`，包括软件/系统 8 题、表格 12 题、文档邮件 12 题、跨工具 8 题。它是人工选定子集，不是完整官方基准。每组在本报告中每题使用一条结果，完整通过率 = reward=1 的题数/40，平均 reward 单独报告。缺失评分或未执行任务在固定分母主口径计 0，并保留异常标记。
+The fixed subset in `subset-previous40.json` contains 40 manually selected tasks: 8 software/system tasks, 12 spreadsheet tasks, 12 document/email tasks and 8 cross-tool tasks. It is a subset of the official benchmark. This report selects one result per task per configuration. Full-pass rate is the number of tasks with reward equal to 1 divided by 40; mean reward is reported separately. Missing scores and tasks that did not execute count as zero in the primary fixed-denominator analysis, with exception markers retained.
 
-A0–A5 均使用 OpenRouter Qwen3.7 Flash、固定 Alibaba 供应商、关闭 reasoning、禁止 fallback，其他生成设置保持一致。A1/C1 和 A2/C2 的配套限额与恢复参数属于被测组件方案。A0–A2 选用原始三次重复中的第二轮，A3–A5 采用最终完整补跑轮，包括成功完成的断点续跑；各组 40 条，共 240 条。
+A0–A5 use OpenRouter Qwen3.7 Flash, pin the provider to Alibaba, disable reasoning and disallow fallback. Other generation settings remain consistent. The associated limits and recovery parameters in A1/C1 and A2/C2 are part of those interventions. A0–A2 use the second of the original three repetitions. A3–A5 use the final completed recovery batch, including successfully resumed trials. Each configuration contributes 40 records, for 240 ablation records in total.
 
-### 3.2 为什么选择第二轮
+### 3.2 Why the second repetition was selected
 
-A0–A2 按每题开始时间排序编号，三组统一选择第二条，保留零分，不逐题取最高分。第一轮三组共 16 条基础设施异常，第二轮 3 条，第三轮 43 条，因此第二轮受余额/连接/评分网络问题影响较少。第二轮仍有 2 条评分比较异常，未将它们替换为其他重复。该选择是在实验后完成的，具有选择偏差；“代表性”指运行完整性较好，不表示接近多次运行的均值。
+For each task, A0–A2 trials are ordered by start time and the second record is selected consistently across the three configurations. Zero scores are retained; the highest score is not selected per task. Across the three configurations, the first repetition has 16 infrastructure exceptions, the second has 3 and the third has 43. The second repetition is therefore less affected by balance, connection and scoring-network problems. It still includes 2 scoring-comparison exceptions, which are not replaced with other repetitions.
 
-### 3.3 DeepSeek 历史参照的身份与限制
+This selection was made after the experiments and introduces selection bias. Its rationale is better execution completeness, not demonstrated proximity to the average across repetitions.
 
-DeepSeek 历史轮的实际请求名为官方接口别名 `deepseek-flash`，开启 `thinking` 与 `reasoning_effort=high`，最大输出 16,384 tokens，100 步/2400 秒。现有日志不能独立确认其对应特定的4.1权重版本，因此本报告以“DeepSeek Flash历史参照”标识该结果。
+### 3.3 Identity and limitations of the historical DeepSeek reference
 
-DeepSeek 历史轮使用官方直连、早期安装环境；Qwen 消融使用 OpenRouter、reasoning关闭及修复后的离线安装。DeepSeek 的 053 因安装失败没有进入模型执行，010/025 有评分参考下载问题，079 有输入素材异常。这些结果保留在全40题分母中。跨模型差距同时包含模型、reasoning、预算、路由、批次和环境因素。
+The historical DeepSeek run requests the official API alias `deepseek-flash`, enables `thinking` and `reasoning_effort=high`, allows at most 16,384 output tokens, and uses 100-step/2400-second limits. The logs do not independently identify a particular 4.1 weight version. We therefore refer to it as the historical DeepSeek Flash reference.
 
-### 3.4 费用统一口径
+DeepSeek uses the direct official API and an earlier installation environment. The Qwen ablations use OpenRouter, reasoning disabled and the repaired offline installer. DeepSeek task 053 fails during installation before model execution; 010 and 025 encounter scoring-reference download problems; 079 has an input-asset problem. These records remain in the 40-task denominator. The cross-model difference includes model, reasoning, budget, routing, batch and environment effects.
 
-图表统一用项目 2026-10-30 固定价表复算，不混用不同平台账单或旧 LiteLLM 估算。Qwen：非缓存输入/缓存输入/输出分别为 $0.03/$0.006/$0.13 每百万 token；DeepSeek 参照使用项目 DeepSeek 固定档位 $0.15/$0.003/$0.60。由于原 DeepSeek 是官方别名，该档位仅用于标准化成本比较，不代表当时官方实际价格。
+The archived `DS-original` results must not be relabeled as completed runs of the planned OpenRouter `B1-dsflash.yaml` configuration. A matched comparison remains to be run.
 
-每次 run 定义为“一题的一次 trial”，图的横轴为总费用/40。缓存 token 是输入 token 的子集，不能再次加到输入总数上。基础设施开销、机器费用和未返回 usage 的失败请求不含在 token 费用中。
+### 3.4 Standardized cost accounting
 
-## 4. Accuracy–cost plot：成功率与 Pareto 前沿
+All charts use the project's fixed price snapshot dated 2026-10-30 rather than mixing provider invoices or older LiteLLM estimates. Qwen rates per million tokens are $0.03 for non-cached input, $0.006 for cached input and $0.13 for output. The DeepSeek reference uses the project's fixed tier of $0.15/$0.003/$0.60. Because the historical request uses an official alias, this tier is a normalization assumption, not a verified historical official price.
 
-### 4.1 主分析：六组消融与 DeepSeek 参照
+A run means one trial on one task. The chart's horizontal axis is total cost divided by 40. Cached tokens are a subset of input tokens and must not be added to total input again. Infrastructure costs, machine costs and failed requests that return no usage are excluded from token-based cost.
 
-![主分析准确率—成本图](assets/accuracy_cost_main.png)
+## 4. Accuracy–cost analysis and the Pareto frontier
 
-*纵轴是严格完整通过率，非平均 reward。橙线连接观测 Pareto 前沿：在费用更低或相同且成功率更高或相同的配置不存在时，该配置为非支配点。连线只表示非支配关系，不表示可在点间插值。*
+### 4.1 Main analysis: six ablations and the DeepSeek reference
 
-| 配置 | 模型与组件 | 满分/40 | 成功率 | 平均 reward | $/任务 | $/40题 |
+![Accuracy versus cost for the main analysis](assets/accuracy_cost_main.png)
+
+*The vertical axis is strict full-pass rate, not mean reward. The orange line connects observed non-dominated configurations: no other configuration has both equal or lower cost and equal or higher success, with at least one strict improvement. Lines indicate frontier membership and do not imply interpolation between configurations.*
+
+| Configuration | Model and components | Full passes/40 | Full-pass rate | Mean reward | USD/task | USD/40 tasks |
 |---|---|---:|---:|---:|---:|---:|
-| A0 | Qwen；原版行为 | 7 | 17.5% | 0.2317 | 0.006548 | 0.261904 |
-| A1 | Qwen；仅 C1 | 11 | 27.5% | 0.3384 | 0.007931 | 0.317247 |
-| A2 | Qwen；仅 C2 | 10 | 25.0% | 0.2957 | 0.004590 | 0.183618 |
-| A3 | Qwen；仅 C3 | 14 | 35.0% | 0.4138 | 0.007444 | 0.297762 |
-| A4 | Qwen；仅 C4 | 10 | 25.0% | 0.2839 | 0.009214 | 0.368561 |
-| A5 | Qwen；仅 C5 | 10 | 25.0% | 0.2959 | 0.006478 | 0.259118 |
-| DS-original | DeepSeek；原版历史轮 | 20 | 50.0% | 0.5660 | 0.014074 | 0.562964 |
+| A0 | Qwen; original behavior | 7 | 17.5% | 0.2317 | 0.006548 | 0.261904 |
+| A1 | Qwen; only  C1 | 11 | 27.5% | 0.3384 | 0.007931 | 0.317247 |
+| A2 | Qwen; only  C2 | 10 | 25.0% | 0.2957 | 0.004590 | 0.183618 |
+| A3 | Qwen; only  C3 | 14 | 35.0% | 0.4138 | 0.007444 | 0.297762 |
+| A4 | Qwen; only  C4 | 10 | 25.0% | 0.2839 | 0.009214 | 0.368561 |
+| A5 | Qwen; only  C5 | 10 | 25.0% | 0.2959 | 0.006478 | 0.259118 |
+| DS-original | DeepSeek; historical original harness | 20 | 50.0% | 0.5660 | 0.014074 | 0.562964 |
 
-**主图前沿：A2 → A3 → DS-original。** C2 提供较低成本选择，C3 提供更高的 Qwen 成功率，DeepSeek 参照达到更高绝对成功率。跨模型前沿仍是历史观测的描述，不能用来证明更换 harness 等价于更换模型。
+**Observed main frontier: A2 → A3 → DS-original.** C2 offers a lower-cost option, C3 achieves a higher Qwen success rate, and the historical DeepSeek reference has the highest absolute success rate. This cross-model frontier describes historical observations; it does not demonstrate that changing the harness is equivalent to changing the model.
 
-### 4.2 所有已完成配置的探索性图
+### 4.2 Exploratory analysis of all completed configurations
 
-为覆盖实际跑过的配置，额外列出历史原版 Qwen（B0-hist）、E、Q、H。H 采用原21题与安装修复19题合并；不把安装失败原记录和补测结果重复计入。各配置只展示一份明确定义的40题结果，smoke、取消尝试、其他重复不作为新配置重复画点。
+To cover the configurations actually evaluated, the exploratory chart also includes the historical original Qwen run (B0-hist), E, Q and H. H combines 21 original trials with 19 trials rerun after installation repair. Original installation failures and their replacements are not counted twice. Each configuration contributes one explicitly defined 40-task result set; smoke tests, cancelled attempts and other repetitions are not plotted as additional configurations.
 
-![所有已完成配置的准确率—成本图](assets/accuracy_cost_all.png)
+![Accuracy versus cost for all completed configurations](assets/accuracy_cost_all.png)
 
-| 配置 | 模型与组件 | 满分/40 | 成功率 | 平均 reward | $/任务 | $/40题 |
+| Configuration | Model and components | Full passes/40 | Full-pass rate | Mean reward | USD/task | USD/40 tasks |
 |---|---|---:|---:|---:|---:|---:|
-| B0-hist | Qwen；原版历史轮 | 9 | 22.5% | 0.2411 | 0.007299 | 0.291972 |
-| E | Qwen；C1+C2+C4 | 11 | 27.5% | 0.3318 | 0.011036 | 0.441434 |
-| Q | Qwen；C1+C2+C3+C5 | 13 | 32.5% | 0.3688 | 0.012469 | 0.498779 |
-| H | Qwen；C1–C5 | 9 | 22.5% | 0.2910 | 0.013405 | 0.536209 |
+| B0-hist | Qwen; historical original harness | 9 | 22.5% | 0.2411 | 0.007299 | 0.291972 |
+| E | Qwen; C1+C2+C4 | 11 | 27.5% | 0.3318 | 0.011036 | 0.441434 |
+| Q | Qwen; C1+C2+C3+C5 | 13 | 32.5% | 0.3688 | 0.012469 | 0.498779 |
+| H | Qwen; C1–C5 | 9 | 22.5% | 0.2910 | 0.013405 | 0.536209 |
 
-B0-hist 开启 high reasoning 且使用100步/2400秒，E/Q/H 属于先前探索批次；它们用于完整展示，不能替代 A0 基线。探索性全图 Pareto 为 **A2 → A3 → DS-original**。不同预算、缓存与执行时间会影响这些点，不能据此把组合排名解释为组件因果贡献。
+B0-hist enables high reasoning and uses 100-step/2400-second limits. E/Q/H come from earlier exploratory batches. These records provide context and do not replace A0 as the ablation control. The exploratory frontier is also **A2 → A3 → DS-original**. Budget, caching and execution differences prevent interpreting combination rankings as causal component contributions.
 
-## 5. Component ablation：同一基线逐组件比较
+## 5. Component ablation against the same control
 
-每项均比较 A0 与“仅启用一个组件”的配置，其他组件关闭。以下为全40题口径。
+Each comparison uses A0 versus a configuration enabling only one component, with the others disabled. The following results retain all 40 tasks.
 
-| 实验 | 独立开启组件 | 平均reward | Δ平均reward | 成功率 | Δ百分点 | 新增通过/失去通过 | $/任务 | Δ$/任务 |
+| Configuration | Single enabled component | Mean reward | Δ mean reward | Full-pass rate | Δ percentage points | Passes gained/lost | USD/task | Δ USD/task |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| A0 | 无 | 0.2317 | +0.0000 | 17.5% | +0.0 | 0/0 | 0.006548 | +0.000000 |
+| A0 | None | 0.2317 | +0.0000 | 17.5% | +0.0 | 0/0 | 0.006548 | +0.000000 |
 | A1 | C1 | 0.3384 | +0.1067 | 27.5% | +10.0 | 5/1 | 0.007931 | +0.001384 |
 | A2 | C2 | 0.2957 | +0.0640 | 25.0% | +7.5 | 4/1 | 0.004590 | -0.001957 |
 | A3 | C3 | 0.4138 | +0.1821 | 35.0% | +17.5 | 7/0 | 0.007444 | +0.000896 |
 | A4 | C4 | 0.2839 | +0.0522 | 25.0% | +7.5 | 4/1 | 0.009214 | +0.002666 |
 | A5 | C5 | 0.2959 | +0.0642 | 25.0% | +7.5 | 5/2 | 0.006478 | -0.000070 |
 
-C3 的观察增益最大，新增通过7题且没有失去 A0 已通过的任务。C1 次之，净增加4题；C2/C4/C5 均净增加3题，但代价不同。C2 降低参考费用，C4 增加费用，C5 费用接近基线。组件效应不应只用平均reward或调用数中的单项判断。
+C3 has the largest observed gain, adding 7 passes without losing any task passed by A0. C1 adds a net 4 passes. C2/C4/C5 each add a net 3, but their costs differ: C2 reduces estimated cost, C4 increases it, and C5 remains close to the control. Mean reward or call count alone is insufficient to characterize a component's effect.
 
-A4 输入token为26.34M，低于A0的26.88M，但缓存输入从24.48M降至19.55M，调用从1096增至1282，输出也增加。它显示压缩的局部节省可能被缓存损失与额外执行抵消；尚不能只凭此断言具体任务发生了遗忘。
+A4 uses 26.34M input tokens versus A0's 26.88M, but cached input falls from 24.48M to 19.55M, model calls increase from 1096 to 1282, and output tokens also increase. Local compression savings can therefore be offset by cache loss and additional execution. These aggregate figures alone do not establish that a specific task failed because of forgotten information.
 
-### 5.1 评分异常敏感性
+### 5.1 Sensitivity to scoring exceptions
 
-全40题中，评分网络/比较异常涉及010、016、020、025、080、083、096。共同排除这7题后，各组使用同一33题；任务本身超时与agent执行失败继续保留。
+Scoring-network or comparison exceptions affect tasks 010, 016, 020, 025, 080, 083 and 096. Excluding these 7 tasks consistently leaves a common 33-task subset for every ablation configuration. Task timeouts and agent execution failures remain included.
 
-| 配置 | 共同33题平均reward | 满分/33 | 完整通过率 |
+| Configuration | Mean reward, common 33 tasks | Full passes/33 | Full-pass rate |
 |---|---:|---:|---:|
 | A0 | 0.2809 | 7 | 21.2% |
 | A1 | 0.4102 | 11 | 33.3% |
@@ -123,13 +127,13 @@ A4 输入token为26.34M，低于A0的26.88M，但缓存输入从24.48M降至19.5
 | A4 | 0.3138 | 9 | 27.3% |
 | A5 | 0.3284 | 9 | 27.3% |
 
-C3 在该共同子集上仍有最高的平均reward及完整通过率。共同子集由观测异常事后确定，存在选择偏差，不能替代全40题主结果；它也没有消除跨批次和随机性问题。
+C3 still has the highest mean reward and full-pass rate on this subset. The exclusions were determined retrospectively from observed exceptions and introduce selection bias. This analysis supplements the full 40-task results and does not remove batch differences or randomness.
 
-## 6. Cost breakdown：推理与新增 harness 开销
+## 6. Cost breakdown: inference and additional harness overhead
 
-### 6.1 可直接观测的 token 和费用
+### 6.1 Directly observed tokens and estimated cost
 
-| 配置 | 输入token/任务（含缓存） | 其中缓存/任务 | 输出token/任务 | 调用/任务 | 总$/任务 |
+| Configuration | Input tokens/task (including cached) | Cached input/task | Output tokens/task | Calls/task | Total USD/task |
 |---|---:|---:|---:|---:|---:|
 | A0 | 672,012.3 | 611,977.6 | 8,267.0 | 27.40 | 0.006548 |
 | A1 | 736,106.8 | 655,811.2 | 12,211.0 | 29.93 | 0.007931 |
@@ -143,31 +147,31 @@ C3 在该共同子集上仍有最高的平均reward及完整通过率。共同�
 | Q | 1,302,053.1 | 1,173,654.4 | 12,119.8 | 44.83 | 0.012469 |
 | H | 849,403.8 | 563,270.4 | 11,089.3 | 42.73 | 0.013405 |
 
-总费用按逐响应 usage 求和后复算：
+Total cost is recomputed from the usage returned by individual responses:
 
 ```text
 C_total = [(T_input − T_cached) × p_input + T_cached × p_cache + T_output × p_output] / 10^6
 ```
 
-DeepSeek 固定档位复算的40题费用与旧报告的Harbor估算 $0.652062 不同；图表使用前者，旧值仅作历史记录，不与Qwen固定价复算直接混比。
+The fixed-tier recomputation of the 40-task DeepSeek cost differs from the older Harbor estimate of $0.652062. Charts use the recomputed figure. The older estimate is retained only as a historical reference and is not mixed with Qwen's fixed-price recomputation.
 
-### 6.2 拆分定义：可复算的近似分摊
+### 6.2 Definition of the approximate overhead allocation
 
-API只提供总输入/缓存/输出usage，没有逐文本片段账单。为提供透明的拆分，本报告把 **相对A0新增的harness输入文本** 定义为 overhead：预算/停滞注释、自检反馈及恢复消息、压缩提示标记，以及C5初始模板相对A0的正向字符增量。A0和原版历史组的“新增overhead”为0，**不表示原harness没有系统提示或工具封装成本**；原有模板成本归入推理侧剩余项。
+The API supplies total input, cached input and output usage, without billing individual text fragments. We define **additional harness input text relative to A0** as overhead: budget and stall notices, verification feedback, recovery messages, compression markers and any positive increase in the initial C5 templates relative to A0. Additional overhead is zero for A0 and the historical original-harness groups. This does not imply that their system prompts or tool wrappers are free; original template costs belong to the inference-side residual.
 
-逐次请求重建当前历史，C4按实现重建压缩视图；在每次有usage的调用前累计仍会发送的新增文本字符数，避免只数首次注入。按4字符≈1 token估计，再用该请求的观测缓存占比分摊命中与非命中费用。恢复消息本身带有失败响应usage时，不计入该次请求，只计入后续请求。
+For each request, we reconstruct the history and, when C4 is enabled, the compressed view used by the implementation. Before each usage-bearing call, we count the additional harness characters that would still be sent, rather than counting only their first insertion. Tokens are approximated at 4 characters per token, and the request's observed cache fraction allocates cached and non-cached input cost. When a recovery message itself carries usage from a failed response, its text is counted only in subsequent requests.
 
 ```text
-T_harness,j ≈ min(T_input,j, 新增harness字符数_j / 4)
+T_harness,j ≈ min(T_input,j, additional_harness_characters_j / 4)
 r_j = T_cached,j / T_input,j
 C_harness,j ≈ T_harness,j × [(1−r_j)p_input + r_j p_cache] / 10^6
 T_inference,residual = T_input + T_output − ΣT_harness,j
 C_inference,residual = C_total − ΣC_harness,j
 ```
 
-“推理侧剩余项”包括模型生成、任务/工具信息及原有harness文本，不是去掉组件后的反事实推理成本。自检导致的后续主模型生成仍属于推理侧；新增harness没有另开专用LLM调用。C5比A0更短的模板不会被记成负overhead。
+The inference-side residual includes generated output, task/tool information and original harness text. It is not a counterfactual estimate of inference without the component. Additional base-model generation after verification feedback remains on the inference side; the added harness does not initiate a separate dedicated LLM call. A C5 template shorter than A0 does not produce negative overhead.
 
-| 配置 | 推理侧剩余token/任务≈ | 新增harness token/任务≈ | 推理侧剩余$/任务≈ | 新增harness $/任务≈ | 总$/任务 |
+| Configuration | Residual inference tokens/task ≈ | Additional harness tokens/task ≈ | Residual inference USD/task ≈ | Additional harness USD/task ≈ | Total USD/task |
 |---|---:|---:|---:|---:|---:|
 | A0 | 680,279.2 | 0.0 | 0.0065476 | 0.0000000 | 0.0065476 |
 | A1 | 729,612.9 | 18,705.0 | 0.0077720 | 0.0001591 | 0.0079312 |
@@ -181,9 +185,9 @@ C_inference,residual = C_total − ΣC_harness,j
 | Q | 1,251,564.5 | 62,608.4 | 0.0119272 | 0.0005423 | 0.0124695 |
 | H | 799,358.4 | 61,134.6 | 0.0125314 | 0.0008738 | 0.0134052 |
 
-**该表是估算，不是精确计量。** 4字符/token并非Qwen/DeepSeek tokenizer；缓存实际按前缀命中，不一定均匀分布在新增片段；序列化封装也可能引入额外token。因此“API总额”可信度高于内部拆分。对主要六组，用3–5字符/token与“全部新增文本命中缓存/全部不命中”组合给出敏感性区间：
+**This allocation is an estimate, not precise measurement.** Four characters per token is not the Qwen or DeepSeek tokenizer. Actual cache hits follow prefixes and may not be distributed evenly across added text. Serialization can introduce further tokens. Total cost derived from API usage is therefore better supported than the internal allocation. For the six main ablations, the following sensitivity scenarios combine 3–5 characters per token with assumptions that all added text is cached or none is cached:
 
-| 配置 | 新增harness参考$/任务：低情景—高情景 |
+| Configuration | Additional harness USD/task: low–high scenario |
 |---|---:|
 | A0 | 0.0000000 — 0.0000000 |
 | A1 | 0.0000898 — 0.0007482 |
@@ -192,78 +196,85 @@ C_inference,residual = C_total − ΣC_harness,j
 | A4 | 0.0000551 — 0.0004592 |
 | A5 | 0.0000234 — 0.0001951 |
 
-这不是统计置信区间，也不是严格误差界，只展示分摊假设的敏感性。本地规则检查、压缩及Docker的CPU时间不计token美元；日志未独立记录这些hook耗时，故不伪造基础设施费用。
+These ranges are neither statistical confidence intervals nor strict error bounds. They show sensitivity to the allocation assumptions. CPU time for local checks, compression and Docker is excluded from token-based dollars. Hook execution time was not separately logged, so no infrastructure-cost figures are inferred from it.
 
-## 7. Failure classification：失败分类与轨迹证据
+## 7. Failure classification and trajectory evidence
 
-分类以可观察失败机制为依据，同一任务可能同时有模型决策、harness处理和评分环境问题；以下为已核验案例，不把所有零分强行划为某一类，也不据此编造全量类别占比。
+Classification follows observable failure mechanisms. A task may involve model decisions, harness behavior and scoring-environment problems together. The following verified cases do not constitute an exhaustive classification of every zero score or support fabricated category percentages.
 
-### 7.1 Harness-level：工具调用格式恢复耗尽后终止
+### 7.1 Harness-level: format-error recovery exhausted
 
-**A2 / 092-fix-tetris-bug：reward=0，退出状态 `RepeatedFormatError`。** 轨迹末段连续出现“没有有效bash调用”的恢复消息，最后达到错误容忍上限并停止。消息来自模型与工具接口的交界：模型没有形成可解析调用，harness的有限恢复仍未让执行继续。这与模型是否能修复代码是不同的问题；增加容忍次数并没有保证恢复成功。
+**A2 / 092-fix-tetris-bug: reward=0, exit status `RepeatedFormatError`.** The final trajectory repeatedly shows recovery messages stating that no valid bash call was received, followed by termination at the error-tolerance limit. At the model/tool interface, the model does not produce a parseable call and the harness's bounded recovery cannot resume useful execution. This is distinct from whether the model can solve the underlying code repair task. Greater error tolerance does not guarantee recovery.
 
-轨迹链：收到无有效工具调用的响应 → 注入“必须调用bash”的恢复提示 → 连续多次仍无有效调用 → `RepeatedFormatError`退出 → 评分为0。
+Observed sequence: response without a valid tool call → feedback requiring bash → repeated invalid calls → `RepeatedFormatError` exit → zero reward.
 
-[A2/092 完整轨迹](<../results/raw/A2/092-fix-tetris-bug__ANjgV33/agent/mini-swe-agent.trajectory.json>)。建议后续检查finish_reason、输出截断、格式模板兼容性与恢复分支；当前记录不足以认定全部错误由输出截断引起。
+See the [A2/092 trajectory](../results/raw/A2/092-fix-tetris-bug__ANjgV33/agent/mini-swe-agent.trajectory.json). Further investigation should examine finish reasons, output truncation, template compatibility and recovery branches. The current evidence does not establish that truncation causes all such failures.
 
-### 7.2 Harness-level：产物提交缺少有效检查
+### 7.2 Harness-level: insufficient checks before artifact submission
 
-**A0 / 018-calculate-total-earnings：reward=0；A3同题reward=1。** A3自检明确指出2个公式单元格均缺少缓存值，评分器以data_only方式读取时会得到空值。模型随后用LibreOffice重算保存并验证E3=191.666666666667，第二次提交后满分。这是“提交前反馈参与修复”的直接轨迹证据。A0未提供同样的自检机会；两次运行仍不是同一轨迹的完全受控重放，不能把全部差值唯一归因于一个反馈。
+**A0 / 018-calculate-total-earnings: reward=0; A3 on the same task: reward=1.** A3's verification feedback identifies 2 formula cells without cached values, which a verifier using `data_only` would read as empty. The model then recalculates and saves through LibreOffice, verifies E3=191.666666666667, and passes after the second submission. This directly supports the mechanism of feedback enabling a repair. A0 provides no equivalent verification opportunity. The two trials are not controlled replays of an identical trajectory, so the entire score difference cannot be uniquely attributed to one feedback message.
 
-[A0/018 对照轨迹](<../results/raw/A0/018-calculate-total-earnings__czbhyNY/agent/mini-swe-agent.trajectory.json>)；[A3/018 自检—修复—提交轨迹](<../results/raw/A3/018-calculate-total-earnings__dDcM7MF/agent/mini-swe-agent.trajectory.json>)。
+See the [A0/018 control trajectory](../results/raw/A0/018-calculate-total-earnings__czbhyNY/agent/mini-swe-agent.trajectory.json) and [A3/018 verification, repair and submission trajectory](../results/raw/A3/018-calculate-total-earnings__dDcM7MF/agent/mini-swe-agent.trajectory.json).
 
-### 7.3 Model-level：领域产物验证不完整
+### 7.3 Model-level: incomplete domain-specific artifact validation
 
-**DeepSeek原版 / 118-set-times-new-roman：reward=0。** 模型修改DOCX字体并进行包完整性、旧字体名和可打开性检查，随后提交；已保存产物仍有2个空run未显式设置Times New Roman。评分器逐run检查字体，导致失败。模型选择的验证范围没有覆盖所有被检查的对象，属于Office领域产物操作/验证策略不足；harness缺少更强验证也可能是共因。
+**Historical original DeepSeek / 118-set-times-new-roman: reward=0.** The model edits DOCX fonts and checks package integrity, old font names and whether the file can be opened before submitting. The saved artifact still contains 2 empty runs without an explicit Times New Roman font assignment. The verifier checks fonts run by run and rejects the result. The chosen validation strategy misses objects inspected by the verifier, indicating a limitation in Office artifact manipulation or validation; insufficient harness validation may also contribute.
 
-轨迹链：编辑字体 → 扫描包中旧字体名、重新打开导出 → 判断完成并提交 → 严格run级检查失败。仅“文档看起来正确”不足以替代结构检查。
+Observed sequence: edit fonts → scan the package for old font names and reopen/export → submit → fail strict run-level inspection. Visual correctness alone does not establish structural compliance.
 
-[DeepSeek/118 完整轨迹](<../results/raw/DS-original/118-set-times-new-roman__nHKdrme/agent/mini-swe-agent.trajectory.json>)；[118评分日志](<../results/raw/DS-original/118-set-times-new-roman__nHKdrme/verifier/test-stdout.txt>)。
+See the [DeepSeek/118 trajectory](../results/raw/DS-original/118-set-times-new-roman__nHKdrme/agent/mini-swe-agent.trajectory.json) and [verifier output](../results/raw/DS-original/118-set-times-new-roman__nHKdrme/verifier/test-stdout.txt).
 
-### 7.4 Model-level：进程管理策略造成执行风险
+### 7.4 Model-level: risky process-management strategy
 
-**A3 / 058-autosave-3-minutes：reward=0，agent非正常退出，未触发自检门。** 轨迹显示反复检查/结束LibreOffice进程，末尾运行 `pkill -9 -f libreoffice` 等广泛进程匹配命令后日志终止。能确认的是模型在进程处理上陷入低效操作并发生异常退出；不能仅凭时序断言该命令直接杀死agent。C3只在提交时介入，无法挽救未到提交阶段的运行。
+**A3 / 058-autosave-3-minutes: reward=0, abnormal agent exit, verification gate never reached.** The trajectory repeatedly inspects or terminates LibreOffice processes and ends after broad process-matching commands such as `pkill -9 -f libreoffice`. The evidence supports inefficient process handling followed by abnormal termination. Temporal order alone does not establish that this command directly killed the agent. C3 activates only at submission and cannot rescue a run that never reaches that stage.
 
-[A3/058 完整轨迹](<../results/raw/A3/058-autosave-3-minutes__siXzzng/agent/mini-swe-agent.trajectory.json>)。
+See the [A3/058 trajectory](../results/raw/A3/058-autosave-3-minutes__siXzzng/agent/mini-swe-agent.trajectory.json).
 
-### 7.5 环境/评分失败：与前两类分开
+### 7.5 Environment and scoring failures
 
-DeepSeek/053 在安装litellm时失败，没有进入模型执行；DeepSeek/010、025及若干消融任务在下载评分参考文件时curl失败；DeepSeek/079的“MP3”实际为Google Drive警告HTML。它们不能直接作为模型能力不足或harness算法失效的证据。报告保留原评分，在异常表和共同子集分析中单列。
+DeepSeek/053 fails while installing LiteLLM, before model execution. DeepSeek/010 and 025, together with several ablation trials, encounter curl failures when downloading scoring references. The supposed MP3 input for DeepSeek/079 is actually a Google Drive warning HTML page. These cases are not direct evidence of insufficient model ability or a failed harness algorithm. Original scores are retained, and scoring exceptions are considered separately in the sensitivity analysis.
 
-[DeepSeek原始批次目录](</Users/xumuqiu/TUA-Bench/jobs/deepseek-flash-subset40-20261030-153129>)；[DeepSeek历史报告中的安装/素材/评分证据](</Users/xumuqiu/Desktop/Tri1材料/PE6203/6203_GP_2/实验结果报告/2026-10-31_DeepSeek-Flash_TUA40/mini-swe-agent_DeepSeek-Flash_TUA-Bench40_实验结果报告_2026-10-31.md>)。
+The [evidence index](../results/trials.csv) identifies each selected DeepSeek trial. After extraction, inspect the corresponding [DeepSeek evidence directory](../results/raw/DS-original/) for setup, exception and verifier logs.
 
 ## 8. Discussion
 
-### 8.1 哪些组件贡献最大
+### 8.1 Which components contribute most?
 
-按单组件相对同一A0的观察差值，C3是最主要的质量收益来源（+17.5个百分点，+0.1821平均reward）。018提供了机制层面的支持：自检发现可修复问题，模型实际修复并通过。C1的成功率增加10个百分点，但费用和调用也上升；其收益包含预算策略变化。C2净增加3题并降低费用，适合成本受限场景。C5净增加3题且费用几乎不变。C4虽然分数提高，但总费用高于基线，当前实现没有达到整体节费目标。
+Relative to the same A0 control, C3 provides the largest observed quality gain: +17.5 percentage points in full-pass rate and +0.1821 mean reward. Task 018 supplies mechanism-level support: the check identifies a repairable issue, and the model repairs it and passes. C1 improves full-pass rate by 10 percentage points while increasing cost and calls; its effect includes budget-policy changes. C2 adds a net 3 passes at lower cost, making it relevant to cost-constrained settings. C5 adds a net 3 passes with almost unchanged cost. C4 improves scores but costs more than A0, so this implementation does not achieve an overall cost reduction.
 
-这些独立增益不能直接相加：C3需要模型先提交，C4可能改变模型能回忆的内容，C1/C2改变终止与恢复路径。历史H全开只通过9/40，低于此次单开C3的14/40，但批次、安装和随机性不同，不能据此证明组件存在负交互；需要在同环境下重跑组合或做完整系统逐项移除才能判断。
+These individual effects cannot simply be added. C3 requires the model to attempt submission, C4 changes available historical information, and C1/C2 alter termination and recovery paths. Historical H passes 9/40, below C3 alone at 14/40, but differences in batch, installation and randomness prevent concluding that the components interact negatively. Matched combination runs or leave-one-component-out comparisons of the full system are needed.
 
-### 8.2 能否以便宜模型接近较强模型
+### 8.2 Can a cheaper model approach the higher-scoring model reference?
 
-A0为17.5%、A3为35.0%、DeepSeek历史参照为50.0%。在本次观察中，C3将Qwen与DeepSeek的成功率差距从32.5个百分点缩小到15.0个百分点，但仍未达到其绝对成功率。以统一固定价格计，A3比DeepSeek参照更便宜；这同时受模型档位、token用量、缓存、reasoning和路由影响，不是纯harness效应。
+A0 achieves 17.5%, A3 achieves 35.0%, and the historical DeepSeek reference achieves 50.0%. In this selected sample, C3 narrows the observed Qwen–DeepSeek gap from 32.5 to 15.0 percentage points without reaching the reference's absolute success rate. Under standardized fixed prices, A3 is cheaper than the DeepSeek reference. Model tier, token use, caching, reasoning and routing all influence this comparison, so it is not a pure harness effect.
 
-### 8.3 基础模型更强时，harness增益是否缩小
+### 8.3 Do harness gains shrink with a stronger base model?
 
-**现有实验不能验证这一点。** 我们有Qwen的原版与改进版，也有DeepSeek原版，但没有同一DeepSeek设置下的C1–C5或H结果。必须比较同一模型内的增益，再比较两个模型的增益差，而不是比较DeepSeek原版与Qwen改进版的绝对得分。
+**The existing experiments cannot answer this question.** We have original and improved Qwen configurations and an original-harness DeepSeek reference, but no C1–C5 or H results under the same DeepSeek settings. Answering the question requires measuring gains within each model and then comparing those gains.
 
-| 比较量 | 本次证据 |
+| Comparison | Available evidence |
 |---|---|
-| ΔQwen(C3)=Qwen+C3−Qwen原版 | +17.5个百分点（本次选择样本） |
-| ΔDeepSeek(C3)=DeepSeek+C3−DeepSeek原版 | 未运行，未知 |
-| 增益是否随模型变强而缩小：ΔDeepSeek−ΔQwen | 无法估计 |
+| ΔQwen(C3) = Qwen+C3 − original Qwen | +17.5 percentage points in the selected sample |
+| ΔDeepSeek(C3) = DeepSeek+C3 − original DeepSeek | Not run; unknown |
+| Difference in gains: ΔDeepSeek − ΔQwen | Cannot be estimated |
 
-可能的机制是：更强模型更少需要预算/恢复提示，但Office缓存、文件保存和严格格式检查等交付问题仍可能存在。DeepSeek/118表明领域验证问题没有自动消失，却不能证明C3一定会修好，因为当前C3只做文件及结构粗查，并不检查所有字体run。
+A stronger model might need fewer budget or recovery notices, while delivery problems involving Office caches, file saving and strict formatting could remain. DeepSeek/118 shows that domain-specific validation problems can persist. It does not prove that C3 would repair that case: the current check inspects files and structure broadly and does not check every font run.
 
-后续最有价值的补充是：锁定模型版本或清楚记录别名、统一路由/reasoning/预算/环境，在Qwen与DeepSeek上分别运行原版与同一改进（优先C3及H），重复配对测试并预先确定异常处理规则。当前报告不补造这部分成绩。
+The most useful extension is to pin model versions or document aliases, align routing/reasoning/budget/environment, and evaluate both original and improved harnesses on both models, prioritizing C3 and H. Repeated paired trials and predeclared exception handling are needed. No scores for these unperformed experiments are supplied here.
 
-### 8.4 实验局限
+### 8.4 Limitations
 
-本实验仅40题、每组报告一条/题；A0–A2第二轮为事后选择，A3–A5为后续补跑；存在评分参考下载、素材及安装异常；模型别名及供应商服务可能变化；缓存状态不能完全控制；新增harness token分摊为估算。结果支持进一步评估C3与C2的实用价值，不支持稳定性、显著性、全量基准或模型能力上限的结论。
+The study uses only 40 tasks and reports one selected result per task per configuration. A0–A2's second repetitions were chosen retrospectively, and A3–A5 come from later recovery runs. Reference-download failures, input-asset problems and installation exceptions remain. Model aliases and provider services may change; cache state is not fully controlled; additional harness-token allocation is approximate. The findings motivate further evaluation of C3 and C2 but do not establish stability, statistical significance, full-benchmark performance or model capability limits.
 
-## 9. 数据与可复现产物
+## 9. Data and reproduction materials
 
-本仓库包含[440条逐题索引](../results/trials.csv)、[原始日志压缩包](../results/raw-440.tar.gz)、[逐文件SHA-256清单](../results/evidence-manifest.json)和[离线复算脚本](../reproduction/recompute.py)。先在仓库根目录解压 `tar -xzf results/raw-440.tar.gz`，再运行 `python reproduction/recompute.py`。解压后上文原始轨迹链接在本地可用；GitHub不展开压缩包。
+The repository includes the [440-trial index](../results/trials.csv), [raw log archive](../results/raw-440.tar.gz), [per-file SHA-256 manifest](../results/evidence-manifest.json) and [offline recomputation script](../reproduction/recompute.py). From the repository root:
 
-运行配置及比较限制见[复现说明](../reproduction/README.md)。索引的source列保留历史选择依据；路径改为仓库相对路径。result.json保持原始字节，SHA-256与原索引一致。原始任务输入/输出artifacts未复制，评分结果、agent轨迹、工具输出、异常和verifier日志包含在压缩包中。
+```bash
+tar -xzf results/raw-440.tar.gz
+python3 reproduction/recompute.py
+```
+
+After extraction, the trajectory links above work locally. GitHub does not expand the archive into browsable files.
+
+See the [reproduction guide](../reproduction/README.md) for commands, configurations and comparison limitations. The index's `source` column retains the historical selection rationale, and file paths are repository-relative. All `result.json` files retain their original bytes and original index hashes. The archive includes scores, agent trajectories, tool outputs, exceptions and verifier logs; original task input/output artifacts are excluded. Credential redactions and their scope are documented in the reproduction guide.
